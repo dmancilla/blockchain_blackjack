@@ -14,10 +14,9 @@ export interface Card {
 
 export const EMPTY_CARD: Card = {suit: Suit.NONE, num: 0, src: `cards/back.png`}
 
-export function getRandomCard(): Card {
-    const suits = Array(Suit.SPADE, Suit.HEART, Suit.CLUB, Suit.DIAMOND)
-    const suit = suits[Math.floor(Math.random() * suits.length)]
-    const num = Math.floor(Math.random() * 13) + 1
+export function getCardFromString(str: string): Card {
+    const suit = str.substring(0, 1) as Suit
+    const num = parseInt(str.substring(1))
     const src = `cards/${suit}${num}.png`
     return {suit, num, src}
 }

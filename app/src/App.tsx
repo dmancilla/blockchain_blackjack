@@ -3,7 +3,7 @@ import Row from 'react-bootstrap/Row'
 import Col from 'react-bootstrap/Col'
 import {Navegacion} from "./Navegacion"
 import React, {useReducer, useState} from "react"
-import {Card, EMPTY_CARD, getRandomCard} from "./Card";
+import {Card, EMPTY_CARD, getCardFromString} from "./Card";
 import {DealerDeck} from "./DealerDeck";
 import DealerHand from "./DealerHand";
 import PlayerHand from "./PlayerHand";
@@ -11,19 +11,35 @@ import PlayerInfo from "./PlayerInfo";
 
 const minBet = 100
 
+interface GameStatus {
+    dealer: {
+        cards: string[]
+        money: number
+    }
+    player: {
+        cards: string[]
+        money: number
+    }
+}
+
 export const App = () => {
 
     function reset() {
-        updateDealer1(EMPTY_CARD)
-        updateDealer2(EMPTY_CARD)
-        updateDealerMoney(10_000)
+        fetch("http://localhost:8080/new", {credentials: "include"})
+            .then(res => res.json())
+            .then((res: GameStatus) => {
+                console.log('Respuesta HTTP /new: ', res)
+                updateDealer1(EMPTY_CARD)
+                updateDealer2(EMPTY_CARD)
+                updateDealerMoney(res.dealer.money)
 
-        updatePlayer1(EMPTY_CARD)
-        updatePlayer2(EMPTY_CARD)
-        updatePlayer3(EMPTY_CARD)
-        updatePlayerMoney(1_000)
+                updatePlayer1(EMPTY_CARD)
+                updatePlayer2(EMPTY_CARD)
+                updatePlayer3(EMPTY_CARD)
+                updatePlayerMoney(res.player.money)
 
-        updateBetMoney(0)
+                updateBetMoney(0)
+            });
     }
 
     function iniciarJuego() {
@@ -31,14 +47,21 @@ export const App = () => {
             console.error("Estado Invalido")
             return
         }
-        updateDealer1(getRandomCard())
-        updatePlayer1(getRandomCard())
-        updatePlayer2(getRandomCard())
-        updatePlayerMoney(playerMoney - minBet)
-        updateBetMoney(betMoney + minBet)
+
+        fetch("http://localhost:8080/init", {credentials: "include"})
+            .then(res => res.json())
+            .then((res: GameStatus) => {
+                console.log('Respuesta HTTP /init: ', res)
+                updateDealer1(getCardFromString(res.dealer.cards[0]))
+                updatePlayer1(getCardFromString(res.player.cards[0]))
+                updatePlayer2(getCardFromString(res.player.cards[1]))
+                updatePlayerMoney(res.player.money - minBet)
+                updateBetMoney(betMoney + minBet)
+            });
     }
 
     function hit() {
+        /*
         if (player2.num == 0) {
             updatePlayer2(getRandomCard())
             return
@@ -49,7 +72,7 @@ export const App = () => {
         }
         if (player4.num == 0) {
             updatePlayer4(getRandomCard())
-        }
+        }*/
     }
 
     function stand() {
