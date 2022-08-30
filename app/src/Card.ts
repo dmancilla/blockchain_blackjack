@@ -8,15 +8,16 @@ enum Suit {
 
 export interface Card {
     suit: Suit
-    num: number
+    number: number
     src: string
 }
 
-export const EMPTY_CARD: Card = {suit: Suit.NONE, num: 0, src: `cards/back.png`}
+export const EMPTY_CARD: Card = {suit: Suit.NONE, number: 0, src: `cards/back.png`}
 
-export function getCardFromString(str: string): Card {
-    const suit = str.substring(0, 1) as Suit
-    const num = parseInt(str.substring(1))
-    const src = `cards/${suit}${num}.png`
-    return {suit, num, src}
+export function getCardFromString(card: Card): Card {
+    return {
+        suit: card.suit,
+        number: card.number,
+        src: `cards/${(card.suit)}${(card.number)}.png`
+    }
 }

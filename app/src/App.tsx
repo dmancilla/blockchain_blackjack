@@ -2,7 +2,7 @@ import Container from 'react-bootstrap/Container'
 import Row from 'react-bootstrap/Row'
 import Col from 'react-bootstrap/Col'
 import {Navegacion} from "./Navegacion"
-import React, {useReducer, useState} from "react"
+import React, {useReducer, useState, useSyncExternalStore} from "react"
 import {Card, EMPTY_CARD, getCardFromString} from "./Card";
 import {DealerDeck} from "./DealerDeck";
 import DealerHand from "./DealerHand";
@@ -11,15 +11,14 @@ import PlayerInfo from "./PlayerInfo";
 
 const minBet = 100
 
-interface GameStatus {
-    dealer: {
-        cards: string[]
-        money: number
-    }
-    player: {
-        cards: string[]
-        money: number
-    }
+interface Game {
+    address: string
+    player: string
+    status: string
+    bet: number
+    dealerCards: Card[]
+    playerCards: Card[]
+    mensajes: string[]
 }
 
 export const App = () => {
@@ -27,36 +26,62 @@ export const App = () => {
     function reset() {
         fetch("http://localhost:8080/new", {credentials: "include"})
             .then(res => res.json())
-            .then((res: GameStatus) => {
-                console.log('Respuesta HTTP /new: ', res)
+            .then((game: Game) => {
+                console.log('Respuesta HTTP /new: ', game)
+                setContractAddress(game.address)
+
                 updateDealer1(EMPTY_CARD)
                 updateDealer2(EMPTY_CARD)
-                updateDealerMoney(res.dealer.money)
 
                 updatePlayer1(EMPTY_CARD)
                 updatePlayer2(EMPTY_CARD)
                 updatePlayer3(EMPTY_CARD)
-                updatePlayerMoney(res.player.money)
+                //TODO: updatePlayerMoney(res.bet.money)
 
-                updateBetMoney(0)
+                updateBetMoney(game.bet)
             });
     }
 
-    function iniciarJuego() {
-        if (dealer2.num != 0 || player2.num != 0) {
+    async function iniciarJuego() {
+        if (dealer2.number != 0 || player2.number != 0) {
             console.error("Estado Invalido")
             return
         }
 
-        fetch("http://localhost:8080/init", {credentials: "include"})
+        await fetch("http://localhost:8080/init", {
+            method: "POST",
+            headers: {
+                'Accept': 'application/json, text/plain, */*',
+                'Content-Type': 'application/json',
+                'ContractAddress': contractAddress
+            },
+            credentials: "include",
+            body: JSON.stringify({"amount": 300})
+        })
             .then(res => res.json())
-            .then((res: GameStatus) => {
-                console.log('Respuesta HTTP /init: ', res)
-                updateDealer1(getCardFromString(res.dealer.cards[0]))
-                updatePlayer1(getCardFromString(res.player.cards[0]))
-                updatePlayer2(getCardFromString(res.player.cards[1]))
-                updatePlayerMoney(res.player.money - minBet)
-                updateBetMoney(betMoney + minBet)
+            .then((game: Game) => {
+                console.log('Respuesta HTTP /init: ', game)
+                //TODO: updatePlayerMoney(res.player.money - minBet)
+                //TODO: updateBetMoney(betMoney + minBet)
+            });
+
+        await fetch("http://localhost:8080/repartir", {
+            method: "POST",
+            headers: {
+                'Accept': 'application/json, text/plain, */*',
+                'Content-Type': 'application/json',
+                'ContractAddress': contractAddress
+            },
+            credentials: "include"
+        })
+            .then(res => res.json())
+            .then((game: Game) => {
+                console.log('Respuesta HTTP /repartir: ', game)
+                updateDealer1(getCardFromString(game.dealerCards[0]))
+                updatePlayer1(getCardFromString(game.playerCards[0]))
+                updatePlayer2(getCardFromString(game.playerCards[1]))
+                //TODO: updatePlayerMoney(res.player.money - minBet)
+                //TODO: updateBetMoney(betMoney + minBet)
             });
     }
 
@@ -100,6 +125,7 @@ export const App = () => {
     const [dealerMoney, updateDealerMoney] = useState(10_000)
     const [playerMoney, updatePlayerMoney] = useState(1_000)
     const [betMoney, updateBetMoney] = useState(0)
+    const [contractAddress, setContractAddress] = useState("")
 
     function getBoard() {
 
@@ -115,15 +141,15 @@ export const App = () => {
             </div>
             <Row>
                 <Col>
-                    <button onClick={() => iniciarJuego()} disabled={player1.num != 0}>Iniciar</button>
+                    <button onClick={() => iniciarJuego()} disabled={player1.number != 0}>Iniciar</button>
                 </Col>
             </Row><Row>
             <Col>
-                <button onClick={() => hit()} disabled={player1.num == 0}>Hit</button>
-                <button onClick={() => stand()} disabled={player1.num == 0}>Stand</button>
-                <button onClick={() => double()} disabled={player1.num == 0}>Double</button>
-                <button onClick={() => split()} disabled={player1.num == 0}>Split</button>
-                <button onClick={() => surrender()} disabled={player1.num == 0}>Surrender</button>
+                <button onClick={() => hit()} disabled={player1.number == 0}>Hit</button>
+                <button onClick={() => stand()} disabled={player1.number == 0}>Stand</button>
+                <button onClick={() => double()} disabled={player1.number == 0}>Double</button>
+                <button onClick={() => split()} disabled={player1.number == 0}>Split</button>
+                <button onClick={() => surrender()} disabled={player1.number == 0}>Surrender</button>
             </Col>
         </Row>
         </div>
