@@ -2,14 +2,13 @@ import Container from 'react-bootstrap/Container'
 import Row from 'react-bootstrap/Row'
 import Col from 'react-bootstrap/Col'
 import {Navegacion} from "./Navegacion"
-import React, {useReducer, useState, useSyncExternalStore} from "react"
+import React, {useEffect, useReducer, useState} from "react"
 import {Card, EMPTY_CARD, getCardFromString} from "./Card";
 import {DealerDeck} from "./DealerDeck";
 import DealerHand from "./DealerHand";
 import PlayerHand from "./PlayerHand";
 import PlayerInfo from "./PlayerInfo";
-
-const minBet = 100
+import Web3 from "web3";
 
 interface Game {
     address: string
@@ -21,9 +20,30 @@ interface Game {
     mensajes: string[]
 }
 
+function inicializarWallet() {
+    console.log('Inicializar Wallet')
+    try {
+        // @ts-ignore
+        const ethereum = window.ethereum;
+        if (ethereum == null) {
+            return;
+        }
+        const web3 = new Web3(ethereum)
+        ethereum.request({method: 'eth_requestAccounts'}).then((x: any) => {
+            console.log('ethereum.enable(): ', x)
+            console.log('Web Version: ', web3.version)
+            console.log('Accounts: ', web3.eth.accounts)
+            console.log('GivenProvider: ', web3.eth.accounts.givenProvider)
+            console.log('Wallet: ', web3.eth.accounts.wallet)
+        });
+    } catch (error) {
+        console.error("Ethereum error: ", error)
+    }
+}
+
 export const App = () => {
 
-    function reset() {
+    async function reset() {
         fetch("http://localhost:8080/new", {credentials: "include"})
             .then(res => res.json())
             .then((game: Game) => {
@@ -43,7 +63,7 @@ export const App = () => {
     }
 
     async function iniciarJuego() {
-        if (dealer2.number != 0 || player2.number != 0) {
+        if (dealer2.number !== 0 || player2.number !== 0) {
             console.error("Estado Invalido")
             return
         }
@@ -127,6 +147,10 @@ export const App = () => {
     const [betMoney, updateBetMoney] = useState(0)
     const [contractAddress, setContractAddress] = useState("")
 
+    useEffect(() => {
+        inicializarWallet();
+    }, []);
+
     function getBoard() {
 
         return <div>
@@ -141,15 +165,15 @@ export const App = () => {
             </div>
             <Row>
                 <Col>
-                    <button onClick={() => iniciarJuego()} disabled={player1.number != 0}>Iniciar</button>
+                    <button onClick={() => iniciarJuego()} disabled={player1.number !== 0}>Iniciar</button>
                 </Col>
             </Row><Row>
             <Col>
-                <button onClick={() => hit()} disabled={player1.number == 0}>Hit</button>
-                <button onClick={() => stand()} disabled={player1.number == 0}>Stand</button>
-                <button onClick={() => double()} disabled={player1.number == 0}>Double</button>
-                <button onClick={() => split()} disabled={player1.number == 0}>Split</button>
-                <button onClick={() => surrender()} disabled={player1.number == 0}>Surrender</button>
+                <button onClick={() => hit()} disabled={player1.number === 0}>Hit</button>
+                <button onClick={() => stand()} disabled={player1.number === 0}>Stand</button>
+                <button onClick={() => double()} disabled={player1.number === 0}>Double</button>
+                <button onClick={() => split()} disabled={player1.number === 0}>Split</button>
+                <button onClick={() => surrender()} disabled={player1.number === 0}>Surrender</button>
             </Col>
         </Row>
         </div>

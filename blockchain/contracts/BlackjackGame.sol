@@ -4,6 +4,7 @@ pragma solidity ^0.8.16;
 import "@openzeppelin/contracts/utils/Strings.sol";
 
 contract BlackjackGame {
+
     uint randNonce = 0;
 
     enum GameStatus {
@@ -16,8 +17,6 @@ contract BlackjackGame {
     }
 
     event Chat(string text);
-
-    error EstadoInvalido(string text);
 
     struct Card {
         uint suit;
@@ -34,31 +33,41 @@ contract BlackjackGame {
 
     Game public _game;
 
-    constructor() {
+    address payable public playerWallet;
+    address payable public casinoWallet;
+
+    constructor() payable {
+        casinoWallet = payable(msg.sender);
         _game.status = GameStatus.NUEVO;
         _game.bet = 0;
     }
 
-    function iniciar(address player) public {
+    function getStatus() public view returns (Game memory) {
+        return _game;
+    }
+
+    function iniciar(address payable _playerWallet) public {
         require(_game.status == GameStatus.NUEVO);
-        _game.player = player;
+        playerWallet = _playerWallet;
+        _game.player = playerWallet;
         _game.status = GameStatus.ESPERANDO_APUESTA;
         emit Chat('Juego iniciado');
     }
 
-    function apostar(uint chips) public {
-        require(_game.status == GameStatus.ESPERANDO_APUESTA);
-        if (chips % 100 != 0) {
-            revert EstadoInvalido('Cantidad de chips invalida');
-        }
-        casinoRecibeChips(chips);
+    function apostar() public payable {
+        require(_game.status == GameStatus.ESPERANDO_APUESTA, 'Estado Invalido');
+        uint chips = msg.value;
+        require(chips % 100 == 0, 'Cantidad de chips invalida');
+
+        casinoRecibeChips();
         _game.bet = chips;
         _game.status = GameStatus.ESPERANDO_REPARTIR;
         emit Chat(string.concat('Apuesta de ', Strings.toString(chips), ' chips iniciada'));
     }
 
-    function repartir() public {
+    function repartir() public payable {
         require(_game.status == GameStatus.ESPERANDO_REPARTIR);
+        require(_game.bet == msg.value, string.concat('El valor de la apuesta debe ser ', toString(_game.bet)));
 
         Card memory dealerCard1 = getRandomCard();
         _game.dealerCards.push(dealerCard1);
@@ -67,8 +76,7 @@ contract BlackjackGame {
         _game.playerCards.push(playerCard1);
 
         Card memory playerCard2 = getRandomCard();
-        _game.playerCards.push(playerCard1);
-
+        _game.playerCards.push(playerCard2);
 
         emit Chat(string.concat('Se reparte ', getCardText(dealerCard1), ' al dealer'));
         emit Chat(string.concat('Se reparte ', getCardText(playerCard1), ' al jugador'));
@@ -76,6 +84,7 @@ contract BlackjackGame {
 
         //if blackjack
         _game.status = GameStatus.ESPERANDO_JUGADOR_1;
+        casinoPagaChips();
         calcularJuego();
     }
 
@@ -147,14 +156,28 @@ contract BlackjackGame {
         return puntaje;
     }
 
-    function casinoRecibeChips(uint chips) private {
-        emit Chat(string.concat('Recibiendo  ', Strings.toString(chips), ' del jugador'));
-        //TODO: Agregar cobro
+    function casinoRecibeChips() private {
+        uint chips = msg.value;
+        string memory chipsStr = Strings.toString(chips);
+        string memory playerAddress = toString(playerWallet);
+        (bool sent, bytes memory _data) = casinoWallet.call{value : chips}("");
+        if (sent) {
+            emit Chat(string.concat('Recepcion OK de ', chipsStr, ' chips del jugador ', playerAddress));
+        } else {
+            emit Chat(string.concat('Error de recepcion de ', chipsStr, ' chips del jugador ', playerAddress));
+        }
     }
 
-    function casinoPagaChips(uint chips) private {
-        emit Chat(string.concat('Pagando ', Strings.toString(chips), ' al jugador'));
-        //TODO: Agregar pago
+    function casinoPagaChips() private {
+        uint chips = msg.value;
+        string memory chipsStr = Strings.toString(chips);
+        string memory playerAddress = toString(playerWallet);
+        (bool sent, bytes memory _data) = playerWallet.call{value : chips}("");
+        if (sent) {
+            emit Chat(string.concat('Pago OK de ', chipsStr, ' chips a Jugador ', playerAddress));
+        } else {
+            emit Chat(string.concat('Error de pago de ', chipsStr, ' chips a Jugador ', playerAddress));
+        }
     }
 
     function gameStatus() public view returns (string memory){
@@ -213,4 +236,34 @@ contract BlackjackGame {
         randNonce++;
         return uint(keccak256(abi.encodePacked(block.timestamp, msg.sender, randNonce))) % max;
     }
+
+    function toString(address account) public pure returns (string memory) {
+        return toString(abi.encodePacked(account));
+    }
+
+    function toString(uint256 value) public pure returns (string memory) {
+        return toString(abi.encodePacked(value));
+    }
+
+    function toString(bytes32 value) public pure returns (string memory) {
+        return toString(abi.encodePacked(value));
+    }
+
+    function toString(bool value) public pure returns (string memory) {
+        return toString(abi.encodePacked(value));
+    }
+
+    function toString(bytes memory data) public pure returns (string memory) {
+        bytes memory alphabet = "0123456789ABCDEF";
+
+        bytes memory str = new bytes(2 + data.length * 2);
+        str[0] = "0";
+        str[1] = "x";
+        for (uint i = 0; i < data.length; i++) {
+            str[2 + i * 2] = alphabet[uint(uint8(data[i] >> 4))];
+            str[3 + i * 2] = alphabet[uint(uint8(data[i] & 0x0f))];
+        }
+        return string(str);
+    }
+
 }

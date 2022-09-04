@@ -1,101 +1,129 @@
 import express, {Express, Request, Response} from "express";
 import dotenv from "dotenv";
-
 import session from "express-session";
-import {getRandomCard} from "./Card";
+import {BigNumber, Contract, ethers} from "ethers";
+import * as fs from "fs";
 
 dotenv.config();
-const app: Express = express();
 
-app.use(session({
-        secret: 'keyboard cat'
-    }
-));
+const providerUrl = process.env.LOCAL_URL !== '' ? process.env.LOCAL_URL : process.env.TESTNET_URL;
+
+const app: Express = express();
+app.use(express.json())
+
+app.use(session({secret: 'keyboard cat'}));
 
 app.all('/*', (req, res, next) => {
     res.header("Access-Control-Allow-Origin", "http://localhost:3000");
     res.header("Access-Control-Allow-Credentials", "true");
-    res.header("Access-Control-Allow-Headers", "X-Requested-With");
+    res.header("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, ContractAddress");
     next();
 });
 
-interface GameStatus {
-    dealer: {
-        cards: string[]
-        money: number
-    }
-    player: {
-        cards: string[]
-        money: number
-    }
+
+interface Game {
+    address: string
+    player: string
+    status: string
+    bet: number
+    dealerCards: string[]
+    playerCards: string[]
+    mensajes: string[]
 }
 
+enum GameStatus {
+    NUEVO,
+    ESPERANDO_APUESTA,
+    ESPERANDO_REPARTIR,
+    ESPERANDO_JUGADOR_1,
+    ESPERANDO_JUGADOR_N,
+    FINALIZADO
+}
 
-class Game {
-    private dMoney: number;
-    private dCards: string[];
+enum CardSuit {
+    S, H, C, D
+}
 
-    private playerMoney: number;
-    private playerCards: string[];
+function getFactory() {
+    const provider = new ethers.providers.JsonRpcProvider(providerUrl);
+    const wallet = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
+    const fileContent = fs.readFileSync("../blockchain/artifacts/contracts/BlackjackGame.sol/BlackjackGame.json", {encoding: 'utf-8'})
+    const factory = ethers.ContractFactory.fromSolidity(fileContent, wallet);
+    return {wallet, factory};
+}
 
-    constructor(dMoney: number, dCards: string[], playerMoney: number, playerCards: string[]) {
-        this.dMoney = dMoney;
-        this.dCards = dCards;
-        this.playerMoney = playerMoney;
-        this.playerCards = playerCards;
+function getCards(nombre: string, cards: any) {
+    for (const card of cards) {
+        console.log(nombre + ' Card: ', card)
     }
+    return cards.map((c: any) => ({suit: CardSuit[BigNumber.from(c.suit).toNumber()], number: BigNumber.from(c.number).toNumber()}))
+}
 
-    stateInit() {
-        this.dCards.push(getRandomCard())
-        this.playerCards.push(getRandomCard());
-        this.playerCards.push(getRandomCard());
-    }
+async function getNewGameStatus(contract: Contract, contractAddress: string) {
+    const gameFullStatus = await contract.getStatus();
+    console.log('GameFullStatus:', gameFullStatus);
+    const mensajes = await contract.queryFilter({topics: []});
 
-    getStatus(): GameStatus {
-        return {
-            dealer: {
-                money: this.dMoney,
-                cards: this.dCards
-            },
-            player: {
-                money: this.playerMoney,
-                cards: this.playerCards
-            },
-        }
-    }
+    const newGame: Game = {
+        address: contractAddress,
+        player: gameFullStatus.player,
+        status: GameStatus[gameFullStatus.status],
+        bet: parseInt(gameFullStatus.bet._hex, 16),
+        dealerCards: getCards('Dealer', gameFullStatus.dealerCards),
+        playerCards: getCards('Player', gameFullStatus.playerCards),
+        mensajes: mensajes.map(m => m.args?.text)
+    };
+    console.log('New Game: ', newGame);
+    return newGame;
 }
 
 app.get("/new", async (req: Request, res: Response) => {
-    const game = new Game(10_000, [], 1_000, []);
-    // @ts-ignore
-    req.session.game = game;
+    const {wallet, factory} = getFactory();
+    const contract = await factory.deploy();
+    const deployedContract = await contract.deployTransaction.wait();
+    const iniciado = await contract.iniciar(wallet.address);
+    console.log('Iniciado: ', iniciado);
+    const newGame = await getNewGameStatus(contract, deployedContract.contractAddress);
 
-    res.json(game.getStatus());
+    // @ts-ignore
+    req.session.game = newGame;
+    res.json(newGame);
 })
 
-app.get("/init", async (req: Request, res: Response) => {
+function getAttachedContract(contractAddress: string) {
+    const {factory} = getFactory();
+    return factory.attach(contractAddress);
+}
+
+app.post("/init", async (req: Request, res: Response) => {
+    console.log('Full Body: ', req.body)
+    const amount = parseInt(req.body.amount, 10);
+    if (isNaN(amount)) {
+        res.send("Amount no es numero")
+        return;
+    }
+    const contractAddress: string = req.header("ContractAddress") || "";
+    const contract = getAttachedContract(contractAddress);
+    const apostar = await contract.apostar(amount);
+    console.log('Apostar: ', apostar);
+    const newGame = await getNewGameStatus(contract, contractAddress);
+
     // @ts-ignore
-    const g = req.session.game;
-
-    const game = new Game(g.dMoney, g.dCards, g.playerMoney, g.playerCards);
-    console.log('Parsed Game : ' + JSON.stringify(game.getStatus()));
-
-    game.stateInit();
-    console.log('New Game    : ' + JSON.stringify(game.getStatus()));
-
-    // @ts-ignore
-    req.session.game = game;
-    res.json(game.getStatus());
+    req.session.game = newGame;
+    res.json(newGame);
 })
 
-/*
-import {getContract} from "./contract";
-const contract = getContract();
-app.get("/", async (req: Request, res: Response) => {
-    const response = await contract.sayHelloWorld();
-    res.json({message: response});
-});
-*/
+app.post("/repartir", async (req: Request, res: Response) => {
+    const contractAddress: string = req.header("ContractAddress") || "";
+    const contract = getAttachedContract(contractAddress);
+    const repartir = await contract.repartir();
+    console.log('Repartir: ', repartir);
+    const newGame = await getNewGameStatus(contract, contractAddress);
+
+    // @ts-ignore
+    req.session.game = newGame;
+    res.json(newGame);
+})
 
 app.listen(process.env.PORT, () => {
     console.log(`[server]: API Server is running at http://localhost:${(process.env.PORT)}`);

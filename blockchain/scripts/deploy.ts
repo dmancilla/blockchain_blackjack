@@ -3,11 +3,12 @@ import { ethers } from "hardhat";
 async function main() {
   console.log("Deploying...");
 
-  const HelloWorld = await ethers.getContractFactory("HelloWorld");
-  const contract = await HelloWorld.deploy();
+  const BlackjackChip = await ethers.getContractFactory("BlackjackChip");
+  const contract = await BlackjackChip.deploy();
   await contract.deployed();
 
-  console.log("Hello World contract deployed at:", contract);
+  console.log("BlackjackChip contract deployed at:", contract);
+
 }
 
 main().catch((error) => {

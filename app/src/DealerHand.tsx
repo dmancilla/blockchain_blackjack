@@ -2,7 +2,6 @@ import Container from "react-bootstrap/Container";
 import Row from "react-bootstrap/Row";
 import Col from "react-bootstrap/Col";
 import React from "react";
-import {EMPTY_CARD} from "./Card";
 
 const DealerHand = (props: { card1: string, card2: string }) => (
     <Container>
