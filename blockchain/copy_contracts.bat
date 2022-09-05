@@ -1,0 +1,1 @@
+COPY D:\Desarrollo\dapp\blockchain\artifacts\contracts\BlackjackGame.sol\BlackjackGame.json D:\Desarrollo\dapp\app\src\contracts

@@ -37,112 +37,78 @@ async function getBalance(signer: SignerWithAddress) {
 
 describe("Blackjack Game", function () {
     let contract: any
-    let validOwnerSigner: SignerWithAddress;
-    let validPlayerSigner: SignerWithAddress;
+    let casinoSigner: SignerWithAddress;
+    let playerSigner: SignerWithAddress;
 
-    let blackjackGame: BlackjackGame
+    let blackjackCasino: BlackjackGame
+    let blackjackPlayer: BlackjackGame
 
     beforeEach(async function () {
-        let signers = await ethers.getSigners();
-        validOwnerSigner = (signers.filter(s => s.address == process.env.ADDRESS))[0];
-        validPlayerSigner = (signers.filter(s => s.address == process.env.PLAYER_ADDRESS))[0];
+        const signers = await ethers.getSigners();
+        casinoSigner = (signers.filter(s => s.address == process.env.ADDRESS))[0];
+        playerSigner = (signers.filter(s => s.address == process.env.PLAYER_ADDRESS))[0];
 
-        contract = await ethers.getContractFactory("BlackjackGame", validOwnerSigner)
-        blackjackGame = await contract.deploy()
-        console.log("Contract Signer: ", await blackjackGame.signer.getAddress());
+        contract = await ethers.getContractFactory("BlackjackGame", casinoSigner)
+        blackjackCasino = await contract.deploy()
+        blackjackPlayer = blackjackCasino.connect(playerSigner);
+
     });
 
     describe("Blackjack Tests", function () {
         it("Debe finalizar correctamente", async function () {
-            let balancePlayer = await getBalance(validPlayerSigner);
-            let balanceCasino = await getBalance(validOwnerSigner);
+            const amount = 200;
 
-            let iniciarTransaction = await blackjackGame.iniciar(validPlayerSigner.address);
-            expect(balancePlayer).eq(await getBalance(validPlayerSigner));
+            const balancePlayer1 = await getBalance(playerSigner);
 
+            const iniciarTransaction = await blackjackPlayer.iniciar();
+            const balancePlayer2 = await getBalance(playerSigner);
+            expect(balancePlayer2.lt(balancePlayer1));
 
-            let iniciarReceipt = await iniciarTransaction.wait();
-            let iniciarText = getSingleEventText(iniciarReceipt);
+            const iniciarReceipt = await iniciarTransaction.wait();
+            const iniciarText = getSingleEventText(iniciarReceipt);
             expect(iniciarText).eq('Juego iniciado')
-            expect(balancePlayer).eq(await getBalance(validPlayerSigner));
+            const balancePlayer3 = await getBalance(playerSigner);
+            expect(balancePlayer3.lt(balancePlayer2));
 
-            let apostarTransaction = await blackjackGame.apostar({value: 200});
-            let apostarReceipt = await apostarTransaction.wait()
-            let apostarText = getSingleEventText(apostarReceipt)
-            expect(apostarText).equalIgnoreCase('Recepcion OK de 200 chips del jugador ' + validPlayerSigner.address)
-            expect(balancePlayer).eq(await getBalance(validPlayerSigner));
+            const apostarTransaction = await blackjackPlayer.apostar({value: amount});
+            const apostarReceipt = await apostarTransaction.wait()
+            const apostarText = getSingleEventText(apostarReceipt)
+            expect(apostarText).equalIgnoreCase('Recepcion de 200 chips del jugador ' + playerSigner.address)
+            const balancePlayer4 = await getBalance(playerSigner);
+            expect(balancePlayer4.lt(balancePlayer3));
 
-            let repartirTransaccion = await blackjackGame.repartir({value: 200});
-            let repartirReceipt = await repartirTransaccion.wait();
-            let eventos = getMultipleEventsText(repartirReceipt);
-            for (let evento of eventos) {
+            const repartirTransaccion = await blackjackPlayer.repartir({value: amount});
+            const repartirReceipt = await repartirTransaccion.wait();
+            const eventos = getMultipleEventsText(repartirReceipt);
+            for (const evento of eventos) {
                 console.log('Evento: ', evento);
             }
 
-            let balancePlayer2 = await getBalance(validPlayerSigner);
-            let balancePlayer2Dif = balancePlayer2.sub(balancePlayer);
-            expect(balancePlayer2Dif.toNumber()).eq(+200);
+            const balancePlayer5 = await getBalance(playerSigner);
+            expect(balancePlayer5.lt(balancePlayer4));
 
-            expect(eventos.length).equals(4)
-            for (let evento of eventos) {
+            expect(eventos.length).equals(3)
+            for (const evento of eventos) {
                 console.log("Evento: " + evento);
             }
 
-            let status = await blackjackGame.gameStatus();
+            const status = await blackjackCasino.gameStatus();
             expect(status).equals("Esperando Jugador")
         });
 
         it("Debe fallar por chips invalidos", async function () {
-            let iniciarTransaction = await blackjackGame.iniciar(validPlayerSigner.address);
-            let iniciarReceipt = await iniciarTransaction.wait();
-            let iniciarText = getSingleEventText(iniciarReceipt);
+            const blackjackGameSigned = blackjackCasino.connect(playerSigner);
+            const iniciarTransaction = await blackjackGameSigned.iniciar();
+            const iniciarReceipt = await iniciarTransaction.wait();
+            const iniciarText = getSingleEventText(iniciarReceipt);
             expect(iniciarText).equals('Juego iniciado')
 
             try {
-                await blackjackGame.apostar({value: 101});
+                await blackjackGameSigned.apostar({value: 101});
             } catch ({message}) {
+                console.log('Message: ', message)
                 expect(message).to.contain('Cantidad de chips invalida')
             }
         });
-    });
-
-    describe("Pruebas de Puntajes", function () {
-
-        it("Debe devolver puntaje 4 (2 cartas)", async function () {
-            let cards = [{suit: 1, number: 2}, {suit: 2, number: 2}];
-            let puntaje = (await blackjackGame.callStatic.getPuntaje(cards)).toNumber();
-            expect(puntaje).equals(4);
-        });
-
-        it("Debe devolver puntaje 20 (1 carta, 1 as)", async function () {
-            let cards = [{suit: 1, number: 9}, {suit: 2, number: 1}];
-            let puntaje = (await blackjackGame.callStatic.getPuntaje(cards)).toNumber();
-            expect(puntaje).equals(20);
-        });
-
-        it("Debe devolver puntaje 21 (2 cartas, 1 as)", async function () {
-            let cards = [{suit: 1, number: 12}, {suit: 2, number: 13}, {suit: 2, number: 1}];
-            let puntaje = (await blackjackGame.callStatic.getPuntaje(cards)).toNumber();
-            expect(puntaje).equals(21);
-        });
-
-        it("Debe devolver 21 (2 cartas, 2 aces)", async function () {
-            let cards = [{suit: 1, number: 4}, {suit: 2, number: 5}, {suit: 2, number: 1}, {suit: 2, number: 1}];
-            let puntaje = (await blackjackGame.callStatic.getPuntaje(cards)).toNumber();
-            expect(puntaje).equals(21);
-        });
-
-        it("Debe devolver Blackjack", async function () {
-            let cards = [{suit: 1, number: 12}, {suit: 2, number: 1}];
-            let puntaje = (await blackjackGame.callStatic.getPuntaje(cards)).toNumber();
-            expect(puntaje).equals(21);
-        });
-
-        it("Debe devolver 22", async function () {
-            let cards = [{suit: 1, number: 12}, {suit: 2, number: 13}, {suit: 2, number: 1}, {suit: 2, number: 1}];
-            let puntaje = (await blackjackGame.callStatic.getPuntaje(cards)).toNumber();
-            expect(puntaje).equals(22);
-        });
-
     });
 });

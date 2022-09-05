@@ -5,14 +5,24 @@ import "@openzeppelin/contracts/utils/Strings.sol";
 
 contract BlackjackGame {
 
+    modifier onlyCasino(){
+        require(msg.sender == casinoWallet, "Only Casino");
+        _;
+    }
+
+    modifier onlyPlayer(){
+        require(msg.sender == playerWallet, "Only Player");
+        _;
+    }
+
     uint randNonce = 0;
 
     enum GameStatus {
         NUEVO,
         ESPERANDO_APUESTA,
         ESPERANDO_REPARTIR,
-        ESPERANDO_JUGADOR_1,
-        ESPERANDO_JUGADOR_N,
+        ESPERANDO_JUGADOR,
+        ESPERANDO_DEALER,
         FINALIZADO
     }
 
@@ -46,15 +56,15 @@ contract BlackjackGame {
         return _game;
     }
 
-    function iniciar(address payable _playerWallet) public {
+    function iniciar() public payable {
         require(_game.status == GameStatus.NUEVO);
-        playerWallet = _playerWallet;
+        playerWallet = payable(msg.sender);
         _game.player = playerWallet;
         _game.status = GameStatus.ESPERANDO_APUESTA;
         emit Chat('Juego iniciado');
     }
 
-    function apostar() public payable {
+    function apostar() public payable onlyPlayer {
         require(_game.status == GameStatus.ESPERANDO_APUESTA, 'Estado Invalido');
         uint chips = msg.value;
         require(chips % 100 == 0, 'Cantidad de chips invalida');
@@ -65,26 +75,23 @@ contract BlackjackGame {
         emit Chat(string.concat('Apuesta de ', Strings.toString(chips), ' chips iniciada'));
     }
 
-    function repartir() public payable {
+    function repartir() public payable onlyPlayer {
         require(_game.status == GameStatus.ESPERANDO_REPARTIR);
         require(_game.bet == msg.value, string.concat('El valor de la apuesta debe ser ', toString(_game.bet)));
 
-        Card memory dealerCard1 = getRandomCard();
-        _game.dealerCards.push(dealerCard1);
+        repartirPlayer();
+        repartirPlayer();
 
-        Card memory playerCard1 = getRandomCard();
-        _game.playerCards.push(playerCard1);
+        repartirDealer();
 
-        Card memory playerCard2 = getRandomCard();
-        _game.playerCards.push(playerCard2);
+        _game.status = GameStatus.ESPERANDO_JUGADOR;
+        calcularJuego();
+    }
 
-        emit Chat(string.concat('Se reparte ', getCardText(dealerCard1), ' al dealer'));
-        emit Chat(string.concat('Se reparte ', getCardText(playerCard1), ' al jugador'));
-        emit Chat(string.concat('Se reparte ', getCardText(playerCard2), ' al jugador'));
-
-        //if blackjack
-        _game.status = GameStatus.ESPERANDO_JUGADOR_1;
-        casinoPagaChips();
+    function pedir() public onlyPlayer {
+        require(_game.status == GameStatus.ESPERANDO_JUGADOR);
+        repartirPlayer();
+        _game.status = GameStatus.ESPERANDO_JUGADOR;
         calcularJuego();
     }
 
@@ -92,41 +99,123 @@ contract BlackjackGame {
     //Si la banca no logra el blackjack, se paga 3 a 2 (2.5 unidades por cada apostada)
     //Si la banca consigue el blackjack, el pago es 1 a 1
     //Si resulta en empate se anulan las apuestas y se devuelve lo apostado a cada jugador.
-    function doblar() public {
-        require(_game.status == GameStatus.ESPERANDO_JUGADOR_1);
-        _game.bet = _game.bet * 2;
+    function doblar() public payable onlyPlayer {
+        require(_game.status == GameStatus.ESPERANDO_JUGADOR && _game.playerCards.length == 2, 'Solo se puede doblar con 2 cartas en la mano');
+        uint newBet = _game.bet * 2;
+
+        require(_game.bet == msg.value, string.concat('El valor agregado a doblar debe ser ', toString(_game.bet)));
+        _game.bet = newBet;
+        casinoRecibeChips();
+
         emit Chat(string.concat('El jugador dobla la apuesta a ', Strings.toString(_game.bet), ' chips'));
 
-        Card memory carta = getRandomCard();
-        _game.playerCards.push(carta);
-        emit Chat(string.concat('Se reparte ', getCardText(carta), ' al dealer'));
-        _game.status = GameStatus.ESPERANDO_JUGADOR_N;
+        repartirPlayer();
+
+        _game.status = GameStatus.ESPERANDO_DEALER;
         calcularJuego();
+        calcularFinal();
     }
 
-    function pedir() public {
-        require(_game.status == GameStatus.ESPERANDO_JUGADOR_1 || _game.status == GameStatus.ESPERANDO_JUGADOR_N);
-        Card memory carta = getRandomCard();
-        _game.playerCards.push(carta);
-        emit Chat(string.concat('Se reparte ', getCardText(carta), ' al dealer'));
-        _game.status = GameStatus.ESPERANDO_JUGADOR_N;
+    function quedarse() public onlyPlayer {
+        require(_game.status == GameStatus.ESPERANDO_JUGADOR);
+        emit Chat(string.concat('Jugador decide no pedir mas cartas'));
+        _game.status == GameStatus.ESPERANDO_DEALER;
         calcularJuego();
+        calcularFinal();
     }
 
-    function rendirse() public {
-        require(_game.status == GameStatus.ESPERANDO_JUGADOR_1 || _game.status == GameStatus.ESPERANDO_JUGADOR_N);
+    function rendirse() public onlyPlayer {
+        require(_game.status == GameStatus.ESPERANDO_JUGADOR);
         uint devolucion = _game.bet / 2;
-        //TODO: Devolucion de la mitad de la apuesta
+        casinoPagaChips(devolucion);
         emit Chat(string.concat('El jugador se retira de la partida, se le devuelven ', Strings.toString(devolucion), ' chips'));
         _game.status = GameStatus.FINALIZADO;
-        calcularJuego();
+    }
+
+    function repartirDealer() private {
+        Card memory carta = getRandomCard();
+        _game.dealerCards.push(carta);
+        emit Chat(string.concat('Se reparte ', getCardText(carta), ' al dealer'));
+    }
+
+    function repartirPlayer() private {
+        Card memory playerCard = getRandomCard();
+        _game.playerCards.push(playerCard);
+        emit Chat(string.concat('Se reparte ', getCardText(playerCard), ' al jugador'));
     }
 
     function calcularJuego() private {
-        if (getPuntaje(_game.dealerCards) > 21) {
+        //BlackJack
+        if (getPuntajePlayer() == 21 && _game.playerCards.length == 2) {
+            emit Chat(string.concat('El jugador gana el juego con Blackjack. Se paga al jugador'));
+            _game.status = GameStatus.FINALIZADO;
+            uint pago = (_game.bet * 3) / 2;
+            casinoPagaChips(pago);
+            return;
+        }
+
+        if (getPuntajeDealer() > 21) {
             emit Chat(string.concat('El dealer perdio el juego. Se paga al jugador'));
             _game.status = GameStatus.FINALIZADO;
+            uint pago = (_game.bet * 3) / 2;
+            casinoPagaChips(pago);
+            return;
         }
+
+        if (getPuntajePlayer() > 21) {
+            uint puntaje = getPuntajePlayer();
+            emit Chat(string.concat('El jugador perdio el juego con ', Strings.toString(puntaje), ' puntos'));
+            _game.status = GameStatus.FINALIZADO;
+            return;
+        }
+    }
+
+    function calcularFinal() private {
+        if (_game.status == GameStatus.FINALIZADO) {
+            return;
+        }
+        while (getPuntajeDealer() < 17) {
+            repartirDealer();
+        }
+        if (getPuntajeDealer() > 21) {
+            emit Chat(string.concat('El dealer perdio el juego. Se paga al jugador'));
+            _game.status = GameStatus.FINALIZADO;
+            uint pago = (_game.bet * 3) / 2;
+            casinoPagaChips(pago);
+            return;
+        }
+        emit Chat(string.concat('El dealer se queda con puntaje ', Strings.toString(getPuntajeDealer())));
+        emit Chat(string.concat('El jugador se queda con puntaje ', Strings.toString(getPuntajePlayer())));
+
+        if (getPuntajeDealer() == getPuntajePlayer()) {
+            emit Chat(string.concat('Empate. El jugador recibe de vuelta su apuesta'));
+            _game.status = GameStatus.FINALIZADO;
+            uint pago = _game.bet;
+            casinoPagaChips(pago);
+            return;
+        }
+
+        if (getPuntajeDealer() > getPuntajePlayer()) {
+            uint puntaje = getPuntajePlayer();
+            emit Chat(string.concat('El jugador perdio el juego con ', Strings.toString(puntaje), ' puntos'));
+            _game.status = GameStatus.FINALIZADO;
+            return;
+        }
+
+        if (getPuntajeDealer() < getPuntajePlayer()) {
+            emit Chat(string.concat('El dealer perdio el juego. Se paga al jugador'));
+            _game.status = GameStatus.FINALIZADO;
+            uint pago = _game.bet * 2;
+            casinoPagaChips(pago);
+        }
+    }
+
+    function getPuntajeDealer() private view returns (uint){
+        return getPuntaje(_game.dealerCards);
+    }
+
+    function getPuntajePlayer() private view returns (uint){
+        return getPuntaje(_game.playerCards);
     }
 
     function getPuntaje(Card[] memory cards) public pure returns (uint)  {
@@ -162,19 +251,18 @@ contract BlackjackGame {
         string memory playerAddress = toString(playerWallet);
         (bool sent, bytes memory _data) = casinoWallet.call{value : chips}("");
         if (sent) {
-            emit Chat(string.concat('Recepcion OK de ', chipsStr, ' chips del jugador ', playerAddress));
+            emit Chat(string.concat('Recepcion de ', chipsStr, ' chips del jugador ', playerAddress));
         } else {
             emit Chat(string.concat('Error de recepcion de ', chipsStr, ' chips del jugador ', playerAddress));
         }
     }
 
-    function casinoPagaChips() private {
-        uint chips = msg.value;
+    function casinoPagaChips(uint chips) private {
         string memory chipsStr = Strings.toString(chips);
         string memory playerAddress = toString(playerWallet);
         (bool sent, bytes memory _data) = playerWallet.call{value : chips}("");
         if (sent) {
-            emit Chat(string.concat('Pago OK de ', chipsStr, ' chips a Jugador ', playerAddress));
+            emit Chat(string.concat('Pago de ', chipsStr, ' chips a Jugador ', playerAddress));
         } else {
             emit Chat(string.concat('Error de pago de ', chipsStr, ' chips a Jugador ', playerAddress));
         }
@@ -191,9 +279,7 @@ contract BlackjackGame {
             return "Esperando Apuesta";
         if (status == GameStatus.ESPERANDO_REPARTIR)
             return "Esperando Repartir";
-        if (status == GameStatus.ESPERANDO_JUGADOR_1)
-            return "Esperando Jugador";
-        if (status == GameStatus.ESPERANDO_JUGADOR_N)
+        if (status == GameStatus.ESPERANDO_JUGADOR)
             return "Esperando Jugador";
         if (status == GameStatus.FINALIZADO)
             return "Finalizado";
